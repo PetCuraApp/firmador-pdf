@@ -6,6 +6,10 @@ Una herramienta web ligera para crear tu firma manuscrita y firmar documentos PD
 
 Todo ocurre **localmente en tu dispositivo**. Tus documentos y tu firma no se envían a ningún servidor.
 
+<p align="center">
+  <img src="assets/demo.png" alt="Firma Simple en funcionamiento" width="750">
+</p>
+
 🌐 **Demo:** `https://petcuraapp.github.io/firmador-pdf/`
 
 ---
