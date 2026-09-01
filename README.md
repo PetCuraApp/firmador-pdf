@@ -20,7 +20,6 @@ Dibuja tu firma directamente con:
 * 🖊️ Un lápiz digital
 * 🖱️ El mouse en tu computador
 
-La firma se puede exportar como **PNG con fondo transparente**, lista para utilizar en cotizaciones, órdenes de compra, formularios y otros documentos.
 
 ### Firmar un PDF
 
