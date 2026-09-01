@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Firmar PDF</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+:root{
+  --ink:#0f172a;--muted:#64748b;--line:#dbe3ec;--bg:#f8fafc;
+  --card:#fff;--soft:#eef2f7;--danger:#b91c1c;
+}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{min-height:100dvh}
+button,input{font:inherit}
+.app{width:min(100%,1000px);margin:auto;padding:14px;display:flex;flex-direction:column;gap:12px;min-height:100dvh}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:clamp(1.25rem,4vw,1.75rem);margin:0}
+.sub{color:var(--muted);font-size:.9rem}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap}
+button,.filebtn{
+  border:0;border-radius:12px;padding:11px 14px;font-weight:700;cursor:pointer;
+  background:var(--soft);color:var(--ink);text-align:center
+}
+button.primary,.filebtn.primary{background:var(--ink);color:#fff}
+button.danger{color:var(--danger)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.filebtn input{display:none}
+
+.viewerShell{
+  flex:1;min-height:420px;background:#e5e7eb;border-radius:16px;
+  overflow:auto;padding:18px;display:flex;align-items:flex-start;justify-content:center;
+  border:1px solid var(--line)
+}
+.empty{
+  margin:auto;text-align:center;color:var(--muted);max-width:360px;line-height:1.5
+}
+.pageStage{
+  position:relative;display:none;background:#fff;box-shadow:0 10px 30px rgba(15,23,42,.15);
+  touch-action:none
+}
+#pdfCanvas{display:block;max-width:100%;height:auto}
+.sigOverlay{
+  position:absolute;display:none;border:1px dashed #475569;touch-action:none;
+  user-select:none;-webkit-user-select:none;cursor:grab;z-index:5
+}
+.sigOverlay img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+.resizeHandle{
+  position:absolute;width:24px;height:24px;right:-12px;bottom:-12px;
+  background:var(--ink);border:3px solid #fff;border-radius:50%;touch-action:none;cursor:nwse-resize
+}
+.removeSig{
+  position:absolute;width:28px;height:28px;left:-14px;top:-14px;border-radius:50%;
+  padding:0;background:#fff;border:1px solid #cbd5e1;color:#b91c1c;font-size:18px;line-height:1
+}
+.bottom{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap
+}
+.nav{display:flex;align-items:center;gap:8px}
+.status{font-size:.9rem;color:var(--muted);min-height:20px}
+
+.modal{
+  position:fixed;inset:0;background:rgba(15,23,42,.62);display:none;align-items:center;justify-content:center;
+  padding:14px;z-index:100
+}
+.modalCard{
+  width:min(96vw,900px);height:min(82dvh,650px);background:#fff;border-radius:18px;padding:14px;
+  display:flex;flex-direction:column;gap:12px
+}
+.modalTop{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.modalTop h2{margin:0;font-size:1.15rem}
+.sigPad{
+  flex:1;position:relative;border:2px dashed #cbd5e1;border-radius:16px;background:#fff;overflow:hidden;
+  min-height:260px;touch-action:none
+}
+#sigCanvas{display:block;width:100%;height:100%;touch-action:none}
+.sigHint{position:absolute;inset:0;display:grid;place-items:center;color:#94a3b8;pointer-events:none;font-size:1.1rem}
+.modalActions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+
+@media(max-width:650px){
+  .app{padding:10px}
+  .viewerShell{padding:8px;min-height:58dvh}
+  button,.filebtn{padding:10px 12px}
+}
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <div>
+      <h1>Firmar PDF</h1>
+      <div class="sub">Todo se procesa en este dispositivo.</div>
+    </div>
+    <div class="toolbar">
+      <label class="filebtn primary">Abrir PDF<input id="pdfInput" type="file" accept="application/pdf"></label>
+      <button id="newSigBtn">Nueva firma</button>
+      <button id="useSavedBtn">Usar firma guardada</button>
+      <button id="savePdfBtn" class="primary" disabled>Guardar PDF</button>
+    </div>
+  </header>
+
+  <section class="viewerShell" id="viewerShell">
+    <div class="empty" id="emptyState">
+      <strong>Abre un PDF.</strong><br>
+      Luego crea o usa tu firma, colócala con el dedo y guarda el documento.
+    </div>
+
+    <div class="pageStage" id="pageStage">
+      <canvas id="pdfCanvas"></canvas>
+      <div class="sigOverlay" id="sigOverlay">
+        <button class="removeSig" id="removeSig" title="Quitar firma">×</button>
+        <img id="sigImage" alt="Firma">
+        <div class="resizeHandle" id="resizeHandle"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="bottom">
+    <div class="nav">
+      <button id="prevBtn" disabled>←</button>
+      <span id="pageInfo">Página 0 / 0</span>
+      <button id="nextBtn" disabled>→</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+</main>
+
+<div class="modal" id="sigModal">
+  <div class="modalCard">
+    <div class="modalTop">
+      <h2>Crea tu firma</h2>
+      <button id="closeModal">Cerrar</button>
+    </div>
+    <div class="sigPad" id="sigPad">
+      <canvas id="sigCanvas"></canvas>
+      <div class="sigHint" id="sigHint">Firma aquí con el dedo</div>
+    </div>
+    <div class="modalActions">
+      <button id="clearSig">Limpiar</button>
+      <button id="saveSig" class="primary">Guardar y usar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = id => document.getElementById(id);
+
+const pdfInput = $("pdfInput");
+const pdfCanvas = $("pdfCanvas");
+const pdfCtx = pdfCanvas.getContext("2d");
+const pageStage = $("pageStage");
+const emptyState = $("emptyState");
+const viewerShell = $("viewerShell");
+const sigOverlay = $("sigOverlay");
+const sigImage = $("sigImage");
+const resizeHandle = $("resizeHandle");
+const removeSig = $("removeSig");
+const statusEl = $("status");
+const pageInfo = $("pageInfo");
+const prevBtn = $("prevBtn");
+const nextBtn = $("nextBtn");
+const savePdfBtn = $("savePdfBtn");
+const newSigBtn = $("newSigBtn");
+const useSavedBtn = $("useSavedBtn");
+
+let pdfBytes = null;
+let pdfDocView = null;
+let currentPage = 1;
+let renderScale = 1;
+let signatureDataUrl = localStorage.getItem("firma_png") || null;
+
+// Guardamos una colocación por página.
+// { page, x, y, w, h } en proporciones del canvas visible (0..1)
+const placements = new Map();
+
+function setStatus(msg){ statusEl.textContent = msg || ""; }
+
+function updateSavedButton(){
+  useSavedBtn.disabled = !signatureDataUrl;
+}
+updateSavedButton();
+
+pdfInput.addEventListener("change", async e => {
+  const file = e.target.files?.[0];
+  if(!file) return;
+
+  try{
+    setStatus("Abriendo PDF...");
+    pdfBytes = new Uint8Array(await file.arrayBuffer());
+    pdfDocView = await pdfjsLib.getDocument({data: pdfBytes.slice()}).promise;
+    currentPage = 1;
+    placements.clear();
+    emptyState.style.display = "none";
+    pageStage.style.display = "block";
+    prevBtn.disabled = false;
+    nextBtn.disabled = false;
+    savePdfBtn.disabled = false;
+    await renderPage();
+    setStatus(file.name);
+  }catch(err){
+    console.error(err);
+    setStatus("No pude abrir ese PDF.");
+  }
+});
+
+async function renderPage(){
+  if(!pdfDocView) return;
+
+  const page = await pdfDocView.getPage(currentPage);
+  const base = page.getViewport({scale:1});
+
+  const maxWidth = Math.max(280, viewerShell.clientWidth - 30);
+  renderScale = Math.min(2, maxWidth / base.width);
+  const viewport = page.getViewport({scale:renderScale});
+
+  const dpr = window.devicePixelRatio || 1;
+  pdfCanvas.width = Math.floor(viewport.width * dpr);
+  pdfCanvas.height = Math.floor(viewport.height * dpr);
+  pdfCanvas.style.width = viewport.width + "px";
+  pdfCanvas.style.height = viewport.height + "px";
+
+  pageStage.style.width = viewport.width + "px";
+  pageStage.style.height = viewport.height + "px";
+
+  const transform = dpr !== 1 ? [dpr,0,0,dpr,0,0] : null;
+  await page.render({canvasContext:pdfCtx, viewport, transform}).promise;
+
+  pageInfo.textContent = `Página ${currentPage} / ${pdfDocView.numPages}`;
+  prevBtn.disabled = currentPage <= 1;
+  nextBtn.disabled = currentPage >= pdfDocView.numPages;
+
+  restoreOverlay();
+}
+
+function restoreOverlay(){
+  const p = placements.get(currentPage);
+  if(!p || !signatureDataUrl){
+    sigOverlay.style.display = "none";
+    return;
+  }
+
+  sigImage.src = signatureDataUrl;
+  sigOverlay.style.left = (p.x * pageStage.clientWidth) + "px";
+  sigOverlay.style.top = (p.y * pageStage.clientHeight) + "px";
+  sigOverlay.style.width = (p.w * pageStage.clientWidth) + "px";
+  sigOverlay.style.height = (p.h * pageStage.clientHeight) + "px";
+  sigOverlay.style.display = "block";
+}
+
+function placeSignature(){
+  if(!pdfDocView){
+    setStatus("Primero abre un PDF.");
+    return;
+  }
+  if(!signatureDataUrl){
+    openSignatureModal();
+    return;
+  }
+
+  sigImage.src = signatureDataUrl;
+
+  let p = placements.get(currentPage);
+  if(!p){
+    const aspect = getStoredAspect();
+    const w = .30;
+    const pixelW = pageStage.clientWidth * w;
+    const pixelH = pixelW / aspect;
+    const h = pixelH / pageStage.clientHeight;
+
+    p = {page:currentPage, x:.35, y:.68, w, h};
+    placements.set(currentPage,p);
+  }
+
+  restoreOverlay();
+  setStatus("Arrastra la firma y cambia su tamaño desde el punto negro.");
+}
+
+function getStoredAspect(){
+  const a = Number(localStorage.getItem("firma_aspect"));
+  return a > 0 ? a : 3;
+}
+
+newSigBtn.addEventListener("click", openSignatureModal);
+useSavedBtn.addEventListener("click", placeSignature);
+
+prevBtn.addEventListener("click", async()=>{
+  if(currentPage > 1){ currentPage--; await renderPage(); }
+});
+nextBtn.addEventListener("click", async()=>{
+  if(pdfDocView && currentPage < pdfDocView.numPages){ currentPage++; await renderPage(); }
+});
+
+window.addEventListener("resize", ()=>{
+  clearTimeout(window.__resizeTimer);
+  window.__resizeTimer=setTimeout(()=>{ if(pdfDocView) renderPage(); },160);
+});
+
+// ---- mover firma ----
+let drag = null;
+
+sigOverlay.addEventListener("pointerdown", e=>{
+  if(e.target === resizeHandle || e.target === removeSig) return;
+  e.preventDefault();
+  sigOverlay.setPointerCapture(e.pointerId);
+  drag = {
+    id:e.pointerId,
+    sx:e.clientX, sy:e.clientY,
+    left:sigOverlay.offsetLeft, top:sigOverlay.offsetTop
+  };
+});
+
+sigOverlay.addEventListener("pointermove", e=>{
+  if(!drag || e.pointerId !== drag.id) return;
+  e.preventDefault();
+  const maxL = pageStage.clientWidth - sigOverlay.offsetWidth;
+  const maxT = pageStage.clientHeight - sigOverlay.offsetHeight;
+  let l = drag.left + e.clientX - drag.sx;
+  let t = drag.top + e.clientY - drag.sy;
+  l = Math.max(0, Math.min(maxL,l));
+  t = Math.max(0, Math.min(maxT,t));
+  sigOverlay.style.left = l+"px";
+  sigOverlay.style.top = t+"px";
+});
+
+function finishDrag(){
+  if(!drag) return;
+  savePlacementFromOverlay();
+  drag=null;
+}
+sigOverlay.addEventListener("pointerup",finishDrag);
+sigOverlay.addEventListener("pointercancel",finishDrag);
+
+// ---- redimensionar ----
+let resizing=null;
+
+resizeHandle.addEventListener("pointerdown",e=>{
+  e.preventDefault(); e.stopPropagation();
+  resizeHandle.setPointerCapture(e.pointerId);
+  resizing={
+    id:e.pointerId,
+    sx:e.clientX,
+    startW:sigOverlay.offsetWidth,
+    aspect:sigOverlay.offsetWidth/sigOverlay.offsetHeight
+  };
+});
+
+resizeHandle.addEventListener("pointermove",e=>{
+  if(!resizing || e.pointerId!==resizing.id)return;
+  e.preventDefault();
+  const maxW=pageStage.clientWidth-sigOverlay.offsetLeft;
+  let w=resizing.startW+(e.clientX-resizing.sx);
+  w=Math.max(70,Math.min(maxW,w));
+  const h=w/resizing.aspect;
+  const maxH=pageStage.clientHeight-sigOverlay.offsetTop;
+  if(h>maxH) w=maxH*resizing.aspect;
+  sigOverlay.style.width=w+"px";
+  sigOverlay.style.height=(w/resizing.aspect)+"px";
+});
+
+function finishResize(){
+  if(!resizing)return;
+  savePlacementFromOverlay();
+  resizing=null;
+}
+resizeHandle.addEventListener("pointerup",finishResize);
+resizeHandle.addEventListener("pointercancel",finishResize);
+
+removeSig.addEventListener("click",e=>{
+  e.stopPropagation();
+  placements.delete(currentPage);
+  sigOverlay.style.display="none";
+  setStatus("Firma quitada de esta página.");
+});
+
+function savePlacementFromOverlay(){
+  placements.set(currentPage,{
+    page:currentPage,
+    x:sigOverlay.offsetLeft/pageStage.clientWidth,
+    y:sigOverlay.offsetTop/pageStage.clientHeight,
+    w:sigOverlay.offsetWidth/pageStage.clientWidth,
+    h:sigOverlay.offsetHeight/pageStage.clientHeight
+  });
+}
+
+// ---- crear firma ----
+const sigModal=$("sigModal");
+const sigPad=$("sigPad");
+const sigCanvas=$("sigCanvas");
+const sigCtx=sigCanvas.getContext("2d",{alpha:true});
+const sigHint=$("sigHint");
+let sigDrawing=false,sigHasInk=false;
+
+function openSignatureModal(){
+  sigModal.style.display="flex";
+  setTimeout(resizeSigCanvas,20);
+}
+
+$("closeModal").addEventListener("click",()=>sigModal.style.display="none");
+
+function resizeSigCanvas(){
+  const r=sigPad.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  sigCanvas.width=Math.round(r.width*dpr);
+  sigCanvas.height=Math.round(r.height*dpr);
+  sigCtx.setTransform(dpr,0,0,dpr,0,0);
+  sigCtx.lineWidth=3;
+  sigCtx.lineCap="round";
+  sigCtx.lineJoin="round";
+  sigCtx.strokeStyle="#000";
+}
+
+function sigPoint(e){
+  const r=sigCanvas.getBoundingClientRect();
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+
+sigCanvas.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  sigDrawing=true; sigHasInk=true; sigHint.style.display="none";
+  const p=sigPoint(e);
+  sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y);
+});
+sigCanvas.addEventListener("pointermove",e=>{
+  if(!sigDrawing)return;
+  e.preventDefault();
+  const p=sigPoint(e);
+  sigCtx.lineTo(p.x,p.y); sigCtx.stroke();
+  sigCtx.beginPath(); sigCtx.moveTo(p.x,p.y);
+});
+["pointerup","pointercancel","pointerleave"].forEach(ev=>{
+  sigCanvas.addEventListener(ev,e=>{ if(sigDrawing){e.preventDefault();sigDrawing=false;sigCtx.closePath();} });
+});
+
+$("clearSig").addEventListener("click",()=>{
+  sigCtx.clearRect(0,0,sigCanvas.width,sigCanvas.height);
+  sigHasInk=false; sigHint.style.display="grid";
+});
+
+function cropSigCanvas(){
+  const w=sigCanvas.width,h=sigCanvas.height;
+  const data=sigCtx.getImageData(0,0,w,h).data;
+  let minX=w,minY=h,maxX=-1,maxY=-1;
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      if(data[(y*w+x)*4+3]>10){
+        if(x<minX)minX=x;if(x>maxX)maxX=x;
+        if(y<minY)minY=y;if(y>maxY)maxY=y;
+      }
+    }
+  }
+  if(maxX<0)return null;
+  const pad=Math.round(18*(window.devicePixelRatio||1));
+  minX=Math.max(0,minX-pad);minY=Math.max(0,minY-pad);
+  maxX=Math.min(w-1,maxX+pad);maxY=Math.min(h-1,maxY+pad);
+  const out=document.createElement("canvas");
+  out.width=maxX-minX+1;out.height=maxY-minY+1;
+  out.getContext("2d").drawImage(sigCanvas,minX,minY,out.width,out.height,0,0,out.width,out.height);
+  return out;
+}
+
+$("saveSig").addEventListener("click",()=>{
+  if(!sigHasInk){setStatus("Primero dibuja la firma.");return;}
+  const cropped=cropSigCanvas();
+  if(!cropped)return;
+
+  signatureDataUrl=cropped.toDataURL("image/png");
+  localStorage.setItem("firma_png",signatureDataUrl);
+  localStorage.setItem("firma_aspect",String(cropped.width/cropped.height));
+  updateSavedButton();
+  sigModal.style.display="none";
+  placeSignature();
+  setStatus("Firma guardada en este dispositivo.");
+});
+
+// ---- exportar PDF ----
+savePdfBtn.addEventListener("click",async()=>{
+  if(!pdfBytes)return;
+  if(placements.size===0){
+    setStatus("No hay ninguna firma colocada.");
+    return;
+  }
+
+  try{
+    savePdfBtn.disabled=true;
+    setStatus("Generando PDF...");
+
+    const {PDFDocument}=PDFLib;
+    const doc=await PDFDocument.load(pdfBytes.slice());
+    const pngBytes=await fetch(signatureDataUrl).then(r=>r.arrayBuffer());
+    const png=await doc.embedPng(pngBytes);
+
+    for(const [pageNum,p] of placements){
+      const page=doc.getPage(pageNum-1);
+      const {width,height}=page.getSize();
+
+      const x=p.x*width;
+      const w=p.w*width;
+      const h=p.h*height;
+      const y=height-(p.y*height)-h;
+
+      page.drawImage(png,{x,y,width:w,height:h});
+    }
+
+    const out=await doc.save();
+    const blob=new Blob([out],{type:"application/pdf"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download="documento-firmado.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    setStatus("PDF firmado guardado.");
+  }catch(err){
+    console.error(err);
+    setStatus("No pude generar el PDF. Algunos PDF protegidos pueden impedir modificaciones.");
+  }finally{
+    savePdfBtn.disabled=false;
+  }
+});
+</script>
+</body>
+</html>
